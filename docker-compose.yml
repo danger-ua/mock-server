@@ -1,0 +1,12 @@
+services:
+  mock-server:
+    image: mock-server
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MOCK_SERVER_ROUTES_PATH: /app/routes.json
+      MOCK_SERVER_WATCH: "1"
+    volumes:
+      # Override host path if needed: e.g. /absolute/path/to/routes.json:/app/routes.json:ro
+      - ./routes.json:/app/routes.json:ro

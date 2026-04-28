@@ -1,0 +1,13 @@
+.vscode
+.cursor
+
+# Go-generated files
+bin/
+coverage.out
+
+# Build artifacts
+build/
+dist/
+
+# Virtual environments
+routes.json

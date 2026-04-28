@@ -1,0 +1,20 @@
+# Git and tooling
+.git
+.gitignore
+.cursor
+
+# Local artifacts
+bin
+coverage.out
+
+# Test files are not needed in the runtime image
+**/*_test.go
+
+# Build artifacts
+build/
+dist/
+*.md
+
+# Docker (avoid recursive copy noise)
+Dockerfile
+.dockerignore

@@ -1,0 +1,52 @@
+{
+  "endpoints": [
+    {
+      "path": "/users",
+      "method": "GET",
+      "status": 200,
+      "response": { "users": [{ "id": 1, "name": "Admin" }] }
+    },
+    {
+      "path": "/upload",
+      "method": "POST",
+      "status": 201,
+      "response": { "message": "Success" }
+    },
+    {
+      "path": "/health",
+      "method": "GET",
+      "status": 200,
+      "response": { "ok": true }
+    },
+    {
+      "path": "/v1/chat/completions",
+      "method": "POST",
+      "status": 200,
+      "response": {
+        "id": "chatcmpl-mock-1",
+        "object": "chat.completion",
+        "choices": [{ "index": 0, "message": { "role": "assistant", "content": "hello" } }]
+      }
+    },
+    {
+      "path": "/unauthorized",
+      "method": "GET",
+      "status": 401,
+      "response": { "error": "unauthorized" }
+    },
+    {
+      "path": "/delay/fast",
+      "method": "GET",
+      "status": 200,
+      "response": { "n": "fast" },
+      "delay": 0.02
+    },
+    {
+      "path": "/delay/slow",
+      "method": "GET",
+      "status": 200,
+      "response": { "n": "slow" },
+      "delay": 0.35
+    }
+  ]
+}
