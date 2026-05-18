@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,9 @@ const (
 	defaultWatchInterval = time.Second
 )
 
+// wholeResponseParam matches a string consisting of exactly `{paramName}` for response interpolation (typed substitution).
+var wholeResponseParamRE = regexp.MustCompile(`^\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+
 type Server struct {
 	routesPath string
 	logger     *log.Logger
@@ -30,7 +34,7 @@ type Server struct {
 
 type routeTable struct {
 	manifest manifest.Manifest
-	routes   map[string]manifest.Endpoint
+	byMethod map[string][]manifest.Endpoint
 }
 
 func New(routesPath string, logger *log.Logger) (*Server, error) {
@@ -104,10 +108,10 @@ func (s *Server) Reload() error {
 
 	table := routeTable{
 		manifest: loaded,
-		routes:   make(map[string]manifest.Endpoint, len(loaded.Endpoints)),
+		byMethod: make(map[string][]manifest.Endpoint),
 	}
 	for _, endpoint := range loaded.Endpoints {
-		table.routes[routeKey(endpoint.Method, endpoint.Path)] = endpoint
+		table.byMethod[endpoint.Method] = append(table.byMethod[endpoint.Method], endpoint)
 	}
 
 	s.state.Store(table)
@@ -157,7 +161,7 @@ func IsTruthyEnv(value string) bool {
 func (s *Server) table() routeTable {
 	value := s.state.Load()
 	if value == nil {
-		return routeTable{routes: map[string]manifest.Endpoint{}}
+		return routeTable{byMethod: map[string][]manifest.Endpoint{}}
 	}
 	return value.(routeTable)
 }
@@ -176,14 +180,32 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) {
-	endpoint, ok := s.table().routes[routeKey(r.Method, r.URL.Path)]
-	if !ok {
+	endpoints := s.table().byMethod[r.Method]
+	if len(endpoints) == 0 {
 		http.NotFound(w, r)
 		return
 	}
 
-	if endpoint.Delay > 0 {
-		timer := time.NewTimer(time.Duration(endpoint.Delay * float64(time.Second)))
+	reqSegments := splitRequestPath(r.URL.Path)
+	var matched manifest.Endpoint
+	var params map[string]string
+	var found bool
+	for _, endpoint := range endpoints {
+		got, ok := matchSegments(endpoint.Segments, reqSegments)
+		if ok {
+			matched = endpoint
+			params = got
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+
+	if matched.Delay > 0 {
+		timer := time.NewTimer(time.Duration(matched.Delay * float64(time.Second)))
 		defer timer.Stop()
 
 		select {
@@ -193,15 +215,87 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, endpoint.Status, endpoint.Response)
+	writeJSON(w, matched.Status, interpolateResponse(matched.Response, params))
 }
 
 func (s *Server) handleOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, buildOpenAPI(s.table().manifest))
 }
 
-func routeKey(method string, path string) string {
-	return method + "\x00" + path
+func splitRequestPath(path string) []string {
+	trimmed := strings.TrimPrefix(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+	var out []string
+	for _, segment := range strings.Split(trimmed, "/") {
+		if segment != "" {
+			out = append(out, segment)
+		}
+	}
+	return out
+}
+
+func matchSegments(pattern []manifest.PathSegment, requestSegments []string) (map[string]string, bool) {
+	if len(pattern) != len(requestSegments) {
+		return nil, false
+	}
+	params := make(map[string]string)
+	for index, segment := range pattern {
+		value := requestSegments[index]
+		if segment.IsParam {
+			if value == "" {
+				return nil, false
+			}
+			params[segment.Param] = value
+			continue
+		}
+		if segment.Literal != value {
+			return nil, false
+		}
+	}
+	return params, true
+}
+
+func interpolateResponse(value any, params map[string]string) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, vv := range v {
+			out[key] = interpolateResponse(vv, params)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for index, vv := range v {
+			out[index] = interpolateResponse(vv, params)
+		}
+		return out
+	case string:
+		return interpolateString(v, params)
+	default:
+		return value
+	}
+}
+
+func interpolateString(s string, params map[string]string) any {
+	match := wholeResponseParamRE.FindStringSubmatch(s)
+	if len(match) == 2 {
+		name := match[1]
+		rawValue, ok := params[name]
+		if ok {
+			var typed any
+			if err := json.Unmarshal([]byte(rawValue), &typed); err == nil {
+				return typed
+			}
+			return rawValue
+		}
+	}
+	out := s
+	for paramName, rawValue := range params {
+		out = strings.ReplaceAll(out, "{"+paramName+"}", rawValue)
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

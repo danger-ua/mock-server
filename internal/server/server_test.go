@@ -13,6 +13,104 @@ import (
 	"time"
 )
 
+func TestPathParamInterpolated(t *testing.T) {
+	mockServer := newTestServer(t, `{
+		"endpoints": [{
+			"path": "/ai-analyzer/{assistant_id}",
+			"method": "GET",
+			"status": 200,
+			"response": {"assistant": "{assistant_id}", "echo": "id={assistant_id}"}
+		}]
+	}`)
+	testServer := httptest.NewServer(mockServer.Handler())
+	defer testServer.Close()
+
+	status, body := requestJSON(t, http.MethodGet, testServer.URL+"/ai-analyzer/assst1234")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d %#v", status, body)
+	}
+	if assistant, ok := body["assistant"].(string); !ok || assistant != "assst1234" {
+		t.Fatalf("expected assistant assst1234, got %#v", body["assistant"])
+	}
+	if echo, ok := body["echo"].(string); !ok || echo != "id=assst1234" {
+		t.Fatalf("expected echo id=assst1234, got %#v", body["echo"])
+	}
+}
+
+func TestMultipleParamsAndTypedSubstitution(t *testing.T) {
+	mockServer := newTestServer(t, `{
+		"endpoints": [{
+			"path": "/items/{id}/qty/{n}",
+			"method": "GET",
+			"status": 200,
+			"response": {"id": "{id}", "n": "{n}", "label": "item {id} x{n}"}
+		}]
+	}`)
+	testServer := httptest.NewServer(mockServer.Handler())
+	defer testServer.Close()
+
+	status, body := requestJSON(t, http.MethodGet, testServer.URL+"/items/abc/qty/42")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d %#v", status, body)
+	}
+
+	if gotID, ok := body["id"].(string); !ok || gotID != "abc" {
+		t.Fatalf("expected id abc, got %#v", body["id"])
+	}
+	if body["n"] != float64(42) {
+		t.Fatalf("expected n 42 float64 from JSON unwrap, got %#v (%T)", body["n"], body["n"])
+	}
+	if label, ok := body["label"].(string); !ok || label != "item abc x42" {
+		t.Fatalf("expected label item abc x42, got %#v", body["label"])
+	}
+}
+
+func TestUnknownTokenLeftAsIs(t *testing.T) {
+	mockServer := newTestServer(t, `{
+		"endpoints": [{
+			"path": "/x/{a}",
+			"method": "GET",
+			"status": 200,
+			"response": {"a": "{a}", "b": "{missing}"}
+		}]
+	}`)
+	testServer := httptest.NewServer(mockServer.Handler())
+	defer testServer.Close()
+
+	status, body := requestJSON(t, http.MethodGet, testServer.URL+"/x/foo")
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", status)
+	}
+	if body["a"] != "foo" {
+		t.Fatalf("expected a foo, got %#v", body["a"])
+	}
+	if body["b"] != "{missing}" {
+		t.Fatalf("expected b literal {missing}, got %#v", body["b"])
+	}
+}
+
+func TestPathParamMissNotFound(t *testing.T) {
+	mockServer := newTestServer(t, `{
+		"endpoints": [{
+			"path": "/ai-analyzer/{id}",
+			"method": "GET",
+			"status": 200,
+			"response": {}
+		}]
+	}`)
+	testServer := httptest.NewServer(mockServer.Handler())
+	defer testServer.Close()
+
+	response, err := http.Get(testServer.URL + "/ai-analyzer/abc/extra")
+	if err != nil {
+		t.Fatalf("GET /ai-analyzer/abc/extra: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", response.StatusCode)
+	}
+}
+
 func TestDynamicRoutesAndAdminEndpoints(t *testing.T) {
 	mockServer := newTestServer(t, `{
 		"endpoints": [

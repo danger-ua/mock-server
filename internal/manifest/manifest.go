@@ -7,12 +7,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const EnvRoutesPath = "MOCK_SERVER_ROUTES_PATH"
 
+// pathParamNameRE matches `{name}` for a whole path segment; name matches [A-Za-z_][A-Za-z0-9_]*.
+var pathParamNameRE = regexp.MustCompile(`^\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+
 type JSONValue = any
+
+// PathSegment is one path segment after splitting on `/`: either a literal string or `{param}`.
+type PathSegment struct {
+	Literal string
+	Param   string
+	IsParam bool
+}
 
 type Endpoint struct {
 	Comment         *string   `json:"comment,omitempty"`
@@ -24,6 +35,8 @@ type Endpoint struct {
 	Name            *string   `json:"name,omitempty"`
 	Summary         *string   `json:"summary,omitempty"`
 	IncludeInSchema bool      `json:"include_in_schema"`
+	Segments        []PathSegment
+	ParamNames      []string
 }
 
 type Manifest struct {
@@ -96,7 +109,7 @@ func LoadFromPath(path string) (Manifest, error) {
 			return Manifest{}, fmt.Errorf("endpoint %d: %w", index, err)
 		}
 
-		key := normalized.Method + " " + normalized.Path
+		key := DuplicateRouteKey(normalized.Method, normalized.Segments)
 		if _, exists := seen[key]; exists {
 			return Manifest{}, fmt.Errorf("duplicate mock endpoint: %s", key)
 		}
@@ -105,6 +118,69 @@ func LoadFromPath(path string) (Manifest, error) {
 	}
 
 	return manifest, nil
+}
+
+// DuplicateRouteKey builds a canonical method+pattern string so `/x/{a}` and `/x/{b}` collide.
+func DuplicateRouteKey(method string, segments []PathSegment) string {
+	var sb strings.Builder
+	sb.WriteString(method)
+	sb.WriteString(" /")
+	for i, seg := range segments {
+		if i > 0 {
+			sb.WriteByte('/')
+		}
+		if seg.IsParam {
+			sb.WriteString("{}")
+		} else {
+			sb.WriteString(seg.Literal)
+		}
+	}
+	return sb.String()
+}
+
+func compilePath(rawPath string) ([]PathSegment, []string, error) {
+	path := strings.TrimSpace(rawPath)
+	if path == "" {
+		return nil, nil, errors.New("path must not be empty")
+	}
+
+	trimmed := strings.TrimPrefix(path, "/")
+	var parts []string
+	for _, p := range strings.Split(trimmed, "/") {
+		if p == "" {
+			continue
+		}
+		parts = append(parts, p)
+	}
+	if len(parts) == 0 {
+		return nil, nil, errors.New("path must contain at least one segment")
+	}
+
+	seenNames := make(map[string]struct{})
+	var paramOrder []string
+	segments := make([]PathSegment, 0, len(parts))
+
+	for _, part := range parts {
+		match := pathParamNameRE.FindStringSubmatch(part)
+		if len(match) == 2 {
+			name := match[1]
+			if _, dup := seenNames[name]; dup {
+				return nil, nil, fmt.Errorf("duplicate path parameter %q", name)
+			}
+			seenNames[name] = struct{}{}
+			paramOrder = append(paramOrder, name)
+			segments = append(segments, PathSegment{IsParam: true, Param: name})
+			continue
+		}
+
+		if strings.HasPrefix(part, "{") || strings.HasSuffix(part, "}") {
+			return nil, nil, fmt.Errorf("invalid path placeholder in segment %q", part)
+		}
+
+		segments = append(segments, PathSegment{Literal: part})
+	}
+
+	return segments, paramOrder, nil
 }
 
 func normalizeEndpoint(raw rawEndpoint) (Endpoint, error) {
@@ -139,6 +215,11 @@ func normalizeEndpoint(raw rawEndpoint) (Endpoint, error) {
 		return Endpoint{}, fmt.Errorf("decode response: %w", err)
 	}
 
+	segments, paramNames, err := compilePath(raw.Path)
+	if err != nil {
+		return Endpoint{}, err
+	}
+
 	return Endpoint{
 		Path:            raw.Path,
 		Method:          method,
@@ -148,5 +229,7 @@ func normalizeEndpoint(raw rawEndpoint) (Endpoint, error) {
 		Name:            raw.Name,
 		Summary:         raw.Summary,
 		IncludeInSchema: includeInSchema,
+		Segments:        segments,
+		ParamNames:      paramNames,
 	}, nil
 }
