@@ -102,6 +102,52 @@ func TestLoadUsesEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestLoadFromPathRejectsDuplicateParameterizedRoutes(t *testing.T) {
+	path := writeManifest(t, `{
+		"endpoints": [
+			{"path": "/x/{a}", "method": "GET", "status": 200, "response": {}},
+			{"path": "/x/{b}", "method": "GET", "status": 200, "response": {}}
+		]
+	}`)
+
+	_, err := LoadFromPath(path)
+	if err == nil || !strings.Contains(err.Error(), "duplicate mock endpoint") {
+		t.Fatalf("expected duplicate route error, got %v", err)
+	}
+}
+
+func TestLoadFromPathRejectsInvalidPlaceholderEmptyName(t *testing.T) {
+	path := writeManifest(t, `{
+		"endpoints": [{
+			"path": "/x/{}",
+			"method": "GET",
+			"status": 200,
+			"response": {}
+		}]
+	}`)
+
+	_, err := LoadFromPath(path)
+	if err == nil || !strings.Contains(err.Error(), "invalid path placeholder") {
+		t.Fatalf("expected invalid placeholder error, got %v", err)
+	}
+}
+
+func TestLoadFromPathRejectsInvalidPlaceholderLeadingDigit(t *testing.T) {
+	path := writeManifest(t, `{
+		"endpoints": [{
+			"path": "/x/{1bad}",
+			"method": "GET",
+			"status": 200,
+			"response": {}
+		}]
+	}`)
+
+	_, err := LoadFromPath(path)
+	if err == nil || !strings.Contains(err.Error(), "invalid path placeholder") {
+		t.Fatalf("expected invalid placeholder error, got %v", err)
+	}
+}
+
 func writeManifest(t *testing.T, content string) string {
 	t.Helper()
 

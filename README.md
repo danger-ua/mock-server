@@ -29,3 +29,16 @@ docker run --rm -p 8000:8000 \
 ```
 
 Set `MOCK_SERVER_WATCH=1` to reload the mounted routes file when it changes. You can also reload manually with `POST /__mock/reload`.
+
+## Makefile
+
+```bash
+make reload                       # POST http://localhost:8000/__mock/reload
+make reload HOST=mock PORT=8080   # override target host/port
+make run                          # go run ./cmd/mock-server
+make test                         # go test ./...
+make build                        # build ./bin/mock-server
+make docker-build                 # docker build -t mock-server .
+make docker-up                    # docker compose up -d
+make docker-down                  # docker compose down
+```
