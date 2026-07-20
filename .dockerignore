@@ -10,11 +10,10 @@ coverage.out
 # Test files are not needed in the runtime image
 **/*_test.go
 
-# Build artifacts
-build/
-dist/
+Makefile
 *.md
 
 # Docker (avoid recursive copy noise)
 Dockerfile
+docker-compose.yml
 .dockerignore

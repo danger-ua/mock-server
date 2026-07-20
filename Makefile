@@ -9,13 +9,13 @@ reload:
 	@curl -fsS -X POST -w "\nHTTP %{http_code}\n" $(RELOAD_URL)
 
 run:
-	go run ./cmd/mock-server
+	go run .
 
 test:
 	go test ./...
 
 build:
-	go build -o bin/mock-server ./cmd/mock-server
+	go build -o bin/mock-server .
 
 docker-build:
 	docker build -t mock-server .
