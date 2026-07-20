@@ -37,7 +37,7 @@ docker run --rm -p 8000:8000 mock-server
 
 1. **Start the server** with default routes:
 ```bash
-go run ./cmd/mock-server
+go run ./
 ```
 
 2. **Test the mock endpoints**:
@@ -135,7 +135,7 @@ make test
 
 # Build binary
 make build
-./bin/mock-server
+./
 ```
 
 ### Using Custom Configuration
